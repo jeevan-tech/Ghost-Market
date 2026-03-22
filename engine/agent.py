@@ -197,8 +197,7 @@ async def run_ghost_agent(
                 print(f"[{agent_id}] Browser error: {exc}")
                 final_status = "ERROR"
             finally:
-                if final_status not in ("BOUNCED", "CONVERTED", "ERROR"):
-                    logger.update_session_status(session_id, "TIMED_OUT")
+                logger.update_session_status(session_id, final_status)
                 logger.increment_completed()
                 await context.close()
                 await browser.close()

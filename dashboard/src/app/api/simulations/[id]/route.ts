@@ -57,7 +57,7 @@ export async function GET(
         const conversionRate = total > 0 ? ((conversions / total) * 100).toFixed(1) + '%' : '0%';
 
         // ── 6. Action funnel ───────────────────────────────────────────────
-        const funnel: Record<string, number> = { READ: 0, SCROLL_DOWN: 0, CLICK: 0, BUY: 0, BOUNCE: 0 };
+        const funnel: Record<string, number> = { READ: 0, SCROLL_DOWN: 0, CLICK: 0, BUY: 0, BOUNCE: 0, ERROR: 0 };
         for (const log of allLogs) {
             const a = (log.action as string) ?? '';
             if (a in funnel) funnel[a]++;

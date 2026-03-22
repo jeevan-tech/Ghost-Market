@@ -96,10 +96,11 @@ const ACTION_STYLES: Record<string, string> = {
     CLICK: "text-indigo-400 bg-indigo-500/10 border-indigo-500/20",
     SCROLL_DOWN: "text-sky-400 bg-sky-500/10 border-sky-500/20",
     READ: "text-gray-400 bg-gray-500/10 border-gray-500/20",
+    ERROR: "text-rose-500 bg-rose-500/10 border-rose-500/20",
 };
 
 const ACTION_HEX: Record<string, string> = {
-    READ: "#6b7280", SCROLL_DOWN: "#38bdf8", CLICK: "#818cf8", BUY: "#10b981", BOUNCE: "#ef4444",
+    READ: "#6b7280", SCROLL_DOWN: "#38bdf8", CLICK: "#818cf8", BUY: "#10b981", BOUNCE: "#ef4444", ERROR: "#f43f5e",
 };
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -181,7 +182,7 @@ function DonutChart({ conversions, bounces, timedOut, errors, total }: {
 /** Action Funnel — horizontal SVG */
 function ActionFunnel({ funnel }: { funnel: Record<string, number> }) {
     const stages = [
-        { key: "Agents", value: (funnel.READ ?? 0) + (funnel.SCROLL_DOWN ?? 0) + (funnel.CLICK ?? 0) + (funnel.BUY ?? 0) + (funnel.BOUNCE ?? 0), color: "#6366f1" },
+        { key: "Total Steps", value: (funnel.READ ?? 0) + (funnel.SCROLL_DOWN ?? 0) + (funnel.CLICK ?? 0) + (funnel.BUY ?? 0) + (funnel.BOUNCE ?? 0) + (funnel.ERROR ?? 0), color: "#6366f1" },
         { key: "Read", value: funnel.READ ?? 0, color: "#818cf8" },
         { key: "Scroll", value: funnel.SCROLL_DOWN ?? 0, color: "#38bdf8" },
         { key: "Click", value: funnel.CLICK ?? 0, color: "#a78bfa" },
