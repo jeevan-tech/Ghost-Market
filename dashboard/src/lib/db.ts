@@ -225,7 +225,7 @@ export async function query(sql: string, params: any[] = []): Promise<Row[]> {
   const s = sql.trim().toLowerCase().replace(/\s+/g, ' ');
 
   // SELECT completed_agents, num_agents FROM simulations WHERE id = ?
-  if (s.includes('completed_agents') && s.includes('num_agents') && s.includes('from simulations')) {
+  if (s.includes('completed_agents') && s.includes('num_agents') && s.includes('from simulations') && s.includes('where id =')) {
     const sim = T.simulations.find(r => r.id === params[0]);
     return sim ? [{ completed_agents: sim.completed_agents, num_agents: sim.num_agents }] : [];
   }
