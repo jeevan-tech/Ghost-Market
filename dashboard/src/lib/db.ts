@@ -1,9 +1,5 @@
-/**
- * Pure TypeScript in-memory store — zero native dependencies.
- * Replaces sqlite3 entirely for Cloud Run deployment.
- * Data persists for the lifetime of the container instance (~hours in demo use).
- * Pre-seeded with 2 sample simulations so the dashboard is never empty.
- */
+import path from 'path';
+import fs from 'fs';
 
 type Row = Record<string, any>;
 
@@ -12,16 +8,124 @@ const T = {
   simulations:    [] as Row[],
   agent_sessions: [] as Row[],
   agent_logs:     [] as Row[],
-  nextId: { simulations: 1, agent_sessions: 1, agent_logs: 1 },
+  simulation_debates: [] as Row[],
+  nextId: { simulations: 1, agent_sessions: 1, agent_logs: 1, simulation_debates: 1 },
 };
 
-// ── Seed helpers ──────────────────────────────────────────────────────────────
+let sqliteDb: any = null;
+
+function getSqliteDb() {
+  if (sqliteDb) return sqliteDb;
+
+  const demoMode = process.env.DEMO_MODE === 'true' || process.env.NODE_ENV === 'production';
+  if (demoMode) return null;
+
+  try {
+    const sqlite3 = require('sqlite3').verbose();
+    const dbFile = path.resolve(process.cwd(), '../engine/ghost_logs.db');
+    const dbDir = path.dirname(dbFile);
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
+    
+    sqliteDb = new sqlite3.Database(dbFile, (err: any) => {
+      if (!err) {
+        sqliteDb.serialize(() => {
+          sqliteDb.run(`
+            CREATE TABLE IF NOT EXISTS simulations (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                target_url        TEXT    NOT NULL,
+                num_agents        INTEGER NOT NULL,
+                completed_agents  INTEGER DEFAULT 0,
+                status            TEXT    DEFAULT 'running',
+                start_time        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                end_time          TIMESTAMP,
+                report_summary    TEXT
+            )
+          `);
+          sqliteDb.run(`
+            CREATE TABLE IF NOT EXISTS agent_sessions (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                simulation_id INTEGER,
+                agent_id      TEXT NOT NULL,
+                persona       TEXT NOT NULL,
+                segment       TEXT DEFAULT 'General',
+                final_status  TEXT,
+                FOREIGN KEY (simulation_id) REFERENCES simulations (id)
+            )
+          `);
+          sqliteDb.run(`
+            CREATE TABLE IF NOT EXISTS agent_logs (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id     INTEGER,
+                step_number    INTEGER NOT NULL,
+                thought_process TEXT,
+                action         TEXT,
+                target         TEXT,
+                page_url       TEXT,
+                scroll_depth   INTEGER,
+                action_success INTEGER,
+                duration_ms    INTEGER,
+                timestamp      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES agent_sessions (id)
+            )
+          `);
+          sqliteDb.run(`
+            CREATE TABLE IF NOT EXISTS simulation_debates (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                simulation_id  INTEGER,
+                agent_id       TEXT NOT NULL,
+                persona        TEXT NOT NULL,
+                message        TEXT NOT NULL,
+                timestamp      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (simulation_id) REFERENCES simulations (id)
+            )
+          `);
+          // Try adding the segment column and count columns in case the db exists but is older schema
+          sqliteDb.run("ALTER TABLE agent_sessions ADD COLUMN segment TEXT DEFAULT 'General'", () => {});
+          sqliteDb.run("ALTER TABLE simulations ADD COLUMN conversions_count INTEGER", () => {});
+          sqliteDb.run("ALTER TABLE simulations ADD COLUMN bounces_count INTEGER", () => {});
+          sqliteDb.run("ALTER TABLE simulations ADD COLUMN timed_out_count INTEGER", () => {});
+          sqliteDb.run("ALTER TABLE simulations ADD COLUMN errors_count INTEGER", () => {});
+        });
+      }
+    });
+    return sqliteDb;
+  } catch (e) {
+    console.warn("Failed to initialize SQLite, using in-memory store instead:", e);
+    return null;
+  }
+}
+
 function ts(offsetSec = 0) {
   return new Date(Date.now() - offsetSec * 1000).toISOString();
 }
-function addSim(url: string, numAgents: number, completed: number, start: string, end: string | null, report: string | null): number {
+function addSim(
+  url: string,
+  numAgents: number,
+  completed: number,
+  start: string,
+  end: string | null,
+  report: string | null,
+  conversions: number | null = null,
+  bounces: number | null = null,
+  timedOut: number | null = null,
+  errors: number | null = null
+): number {
   const id = T.nextId.simulations++;
-  T.simulations.push({ id, target_url: url, num_agents: numAgents, completed_agents: completed, start_time: start, end_time: end, report_summary: report });
+  T.simulations.push({
+    id,
+    target_url: url,
+    num_agents: numAgents,
+    completed_agents: completed,
+    start_time: start,
+    end_time: end,
+    report_summary: report,
+    conversions_count: conversions,
+    bounces_count: bounces,
+    timed_out_count: timedOut,
+    errors_count: errors
+  });
   return id;
 }
 function addSession(simId: number, agentId: string, persona: string, status: string): number {
@@ -173,17 +277,31 @@ addLog(vs10,3,"I need to see customer ROI data before recommending this to my te
 // ── SQL-driven run() / query() ────────────────────────────────────────────────
 
 export async function run(sql: string, params: any[] = []): Promise<{ lastID: number }> {
+  const db = getSqliteDb();
+  if (db) {
+    return new Promise((resolve, reject) => {
+      db.run(sql, params, function (this: any, err: any) {
+        if (err) reject(err);
+        else resolve({ lastID: this.lastID || 0 });
+      });
+    });
+  }
+
   const s = sql.trim().toLowerCase().replace(/\s+/g, ' ');
 
   if (s.startsWith('insert into simulations')) {
     const id = T.nextId.simulations++;
-    T.simulations.push({ id, target_url: params[0], num_agents: params[1], completed_agents: 0, start_time: ts(), end_time: null, report_summary: null });
+    T.simulations.push({ id, target_url: params[0], num_agents: params[1], completed_agents: 0, start_time: ts(), end_time: null, report_summary: null, status: 'running' });
     return { lastID: id };
   }
 
   if (s.startsWith('insert into agent_sessions')) {
     const id = T.nextId.agent_sessions++;
-    T.agent_sessions.push({ id, simulation_id: params[0], agent_id: params[1], persona: params[2], final_status: params[3] });
+    if (params.length === 5) {
+      T.agent_sessions.push({ id, simulation_id: params[0], agent_id: params[1], persona: params[2], segment: params[3], final_status: params[4] });
+    } else {
+      T.agent_sessions.push({ id, simulation_id: params[0], agent_id: params[1], persona: params[2], segment: 'General', final_status: params[3] });
+    }
     return { lastID: id };
   }
 
@@ -191,6 +309,12 @@ export async function run(sql: string, params: any[] = []): Promise<{ lastID: nu
     const id = T.nextId.agent_logs++;
     const [session_id, step_number, thought_process, action, target, page_url, scroll_depth, action_success, duration_ms] = params;
     T.agent_logs.push({ id, session_id, step_number, thought_process, action, target, page_url, scroll_depth, action_success, duration_ms, timestamp: ts() });
+    return { lastID: id };
+  }
+
+  if (s.startsWith('insert into simulation_debates')) {
+    const id = T.nextId.simulation_debates++;
+    T.simulation_debates.push({ id, simulation_id: params[0], agent_id: params[1], persona: params[2], message: params[3], timestamp: ts() });
     return { lastID: id };
   }
 
@@ -202,13 +326,19 @@ export async function run(sql: string, params: any[] = []): Promise<{ lastID: nu
 
   if (s.includes('report_summary') && s.includes('update simulations')) {
     const sim = T.simulations.find(r => r.id === params[1]);
-    if (sim) { sim.report_summary = params[0]; sim.end_time = ts(); }
+    if (sim) { sim.report_summary = params[0]; sim.end_time = ts(); sim.status = 'completed'; }
     return { lastID: 0 };
   }
 
   if (s.includes('update simulations') && s.includes('end_time')) {
     const sim = T.simulations.find(r => r.id === params[0]);
-    if (sim) sim.end_time = ts();
+    if (sim) { sim.end_time = ts(); sim.status = 'completed'; }
+    return { lastID: 0 };
+  }
+
+  if (s.includes('update simulations') && s.includes('status')) {
+    const sim = T.simulations.find(r => r.id === params[1] || r.id === params[0]);
+    if (sim) sim.status = params[0];
     return { lastID: 0 };
   }
 
@@ -222,6 +352,16 @@ export async function run(sql: string, params: any[] = []): Promise<{ lastID: nu
 }
 
 export async function query(sql: string, params: any[] = []): Promise<Row[]> {
+  const db = getSqliteDb();
+  if (db) {
+    return new Promise((resolve, reject) => {
+      db.all(sql, params, (err: any, rows: any[]) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+  }
+
   const s = sql.trim().toLowerCase().replace(/\s+/g, ' ');
 
   // SELECT completed_agents, num_agents FROM simulations WHERE id = ?
@@ -277,6 +417,11 @@ export async function query(sql: string, params: any[] = []): Promise<Row[]> {
     const sids = new Set(sessions.map(s => s.id));
     const logs = T.agent_logs.filter(l => sids.has(l.session_id));
     return logs.map(l => { const s = sessions.find(s => s.id === l.session_id); return { ...l, agent_id: s?.agent_id, persona: s?.persona }; });
+  }
+
+  // SELECT * FROM simulation_debates WHERE simulation_id = ? ORDER BY id ASC
+  if (s.includes('from simulation_debates') && s.includes('simulation_id')) {
+    return T.simulation_debates.filter(r => r.simulation_id === params[0]).sort((a, b) => a.id - b.id);
   }
 
   return [];

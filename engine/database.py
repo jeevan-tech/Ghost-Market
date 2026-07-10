@@ -30,6 +30,7 @@ def init_db():
             simulation_id INTEGER,
             agent_id      TEXT NOT NULL,
             persona       TEXT NOT NULL,
+            segment       TEXT DEFAULT 'General',
             final_status  TEXT,
             FOREIGN KEY (simulation_id) REFERENCES simulations (id)
         )
@@ -53,10 +54,28 @@ def init_db():
         )
     ''')
 
+    # ── simulation_debates ────────────────────────────────────────────────────
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS simulation_debates (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            simulation_id  INTEGER,
+            agent_id       TEXT NOT NULL,
+            persona        TEXT NOT NULL,
+            message        TEXT NOT NULL,
+            timestamp      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (simulation_id) REFERENCES simulations (id)
+        )
+    ''')
+
     # ── Safe migrations for existing databases ────────────────────────────────
     _add_col(cursor, "simulations",  "report_summary",   "TEXT")
     _add_col(cursor, "simulations",  "completed_agents", "INTEGER DEFAULT 0")
     _add_col(cursor, "simulations",  "status",           "TEXT DEFAULT 'completed'")
+    _add_col(cursor, "simulations",  "conversions_count", "INTEGER")
+    _add_col(cursor, "simulations",  "bounces_count",     "INTEGER")
+    _add_col(cursor, "simulations",  "timed_out_count",   "INTEGER")
+    _add_col(cursor, "simulations",  "errors_count",      "INTEGER")
+    _add_col(cursor, "agent_sessions", "segment",         "TEXT DEFAULT 'General'")
     _add_col(cursor, "agent_logs",   "page_url",         "TEXT")
     _add_col(cursor, "agent_logs",   "scroll_depth",     "INTEGER")
     _add_col(cursor, "agent_logs",   "action_success",   "INTEGER")
@@ -82,13 +101,13 @@ class GhostLogger:
     def __init__(self, simulation_id: int):
         self.simulation_id = simulation_id
 
-    def create_session(self, agent_id: str, persona: str) -> int:
+    def create_session(self, agent_id: str, persona: str, segment: str = "General") -> int:
         with sqlite3.connect(DB_PATH) as conn:
             cur = conn.cursor()
             cur.execute(
-                "INSERT INTO agent_sessions (simulation_id, agent_id, persona, final_status) "
-                "VALUES (?, ?, ?, ?)",
-                (self.simulation_id, agent_id, persona, "RUNNING")
+                "INSERT INTO agent_sessions (simulation_id, agent_id, persona, segment, final_status) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (self.simulation_id, agent_id, persona, segment, "RUNNING")
             )
             return cur.lastrowid
 
@@ -177,6 +196,15 @@ def save_report(simulation_id: int, report_text: str):
         )
 
 
+def add_debate_message(simulation_id: int, agent_id: str, persona: str, message: str):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.cursor().execute(
+            "INSERT INTO simulation_debates (simulation_id, agent_id, persona, message) "
+            "VALUES (?, ?, ?, ?)",
+            (simulation_id, agent_id, persona, message)
+        )
+
+
 def get_live_feed(simulation_id: int, since_log_id: int = 0, limit: int = 50) -> list[dict]:
     """
     Returns new agent_logs rows (joined with sessions) since the given log id cursor.
@@ -208,6 +236,16 @@ def get_live_feed(simulation_id: int, since_log_id: int = 0, limit: int = 50) ->
             (simulation_id, since_log_id, limit)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def save_projected_stats(simulation_id: int, conversions: int, bounces: int, timed_out: int, errors: int):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.cursor().execute(
+            """UPDATE simulations 
+               SET conversions_count = ?, bounces_count = ?, timed_out_count = ?, errors_count = ?
+               WHERE id = ?""",
+            (conversions, bounces, timed_out, errors, simulation_id)
+        )
 
 
 if __name__ == "__main__":

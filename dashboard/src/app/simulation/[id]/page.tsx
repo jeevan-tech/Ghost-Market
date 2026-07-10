@@ -42,6 +42,15 @@ type LiveLog = {
     timestamp: string;
 };
 
+type DebateMessage = {
+    id: number;
+    simulation_id: number;
+    agent_id: string;
+    persona: string;
+    message: string;
+    timestamp: string;
+};
+
 type PersonaSegment = {
     label: string;
     total: number;
@@ -79,6 +88,7 @@ type SimDetail = {
     personaSegments: PersonaSegment[];
     pageJourneys: PageJourney[];
     progress: { completed: number; total: number };
+    debate: DebateMessage[];
 };
 
 // ── Colour maps ───────────────────────────────────────────────────────────────
@@ -625,6 +635,62 @@ export default function SimulationDetailPage() {
                                 </div>
                             );
                         })}
+                    </div>
+                </div>
+
+                {/* ── Synthetic Focus Group Debate ─────────────────────────────────── */}
+                <div className="glass rounded-xl overflow-hidden">
+                    <div className="px-6 py-5 border-b border-white/5 flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center">
+                            <Users className="w-4 h-4 text-indigo-400" />
+                        </div>
+                        <div>
+                            <h2 className="text-sm font-semibold">Synthetic Focus Group Debate</h2>
+                            <p className="text-xs text-indigo-400/60 font-mono">Watch autonomous personas argue and review the website in real-time</p>
+                        </div>
+                        {isRunning && (
+                            <span className="ml-auto flex items-center gap-1.5 text-xs text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full animate-pulse">
+                                Active Panel
+                            </span>
+                        )}
+                    </div>
+                    <div className="p-6 space-y-4">
+                        {(!data?.debate || data.debate.length === 0) ? (
+                            <div className="py-12 text-center">
+                                <Users className="w-8 h-8 text-gray-700/50 mx-auto mb-3 animate-pulse" />
+                                <p className="text-sm text-gray-500">
+                                    {isRunning ? "Waiting for agents to compile browsing experiences and begin debate..." : "No focus group debate occurred for this simulation."}
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2" style={{ scrollbarWidth: 'thin' }}>
+                                {data.debate.map((msg) => {
+                                    const session = sessions.find(s => s.agent_id === msg.agent_id);
+                                    const outcome = session?.final_status || 'RUNNING';
+                                    const cfg = STATUS_CFG[outcome] ?? STATUS_CFG.RUNNING;
+                                    
+                                    return (
+                                        <div key={msg.id} className="flex items-start gap-4 border-b border-white/5 pb-4 last:border-0 last:pb-0">
+                                            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center flex-shrink-0 text-sm font-bold text-indigo-300">
+                                                {msg.agent_id.replace('Ghost-', '')}
+                                            </div>
+                                            <div className="flex-1 space-y-1">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <span className="text-sm font-semibold text-gray-200">{msg.agent_id}</span>
+                                                    <span className="text-xs text-gray-500 font-mono italic truncate max-w-sm" title={msg.persona}>{msg.persona}</span>
+                                                    <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border ${cfg.color} ${cfg.bg}`}>
+                                                        {cfg.icon}{cfg.label}
+                                                    </span>
+                                                </div>
+                                                <p className="text-sm text-gray-300 bg-white/[0.01] border border-white/5 rounded-lg p-3 leading-relaxed whitespace-pre-wrap">
+                                                    {msg.message}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
                 </div>
 

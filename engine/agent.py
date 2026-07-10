@@ -59,6 +59,7 @@ async def run_ghost_agent(
     logger: GhostLogger,
     semaphore: asyncio.Semaphore,
     max_steps: int = 5,
+    segment: str = "General",
 ) -> dict:
     """
     Runs one ghost agent. Returns:
@@ -67,7 +68,7 @@ async def run_ghost_agent(
     """
     print(f"\n--- Spawning [{agent_id}] ---")
 
-    session_id  = logger.create_session(agent_id, persona)
+    session_id  = logger.create_session(agent_id, persona, segment)
     thoughts    = []
     final_status = "TIMED_OUT"
 

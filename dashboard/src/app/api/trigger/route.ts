@@ -6,16 +6,16 @@ import { run, query } from '@/lib/db';
 // Generates a realistic, fully-populated simulation purely in TypeScript/Node.js.
 
 const DEMO_PERSONAS = [
-  { name: "Maya", short: "Budget Student", persona: "22-year-old college student, $30/mo budget, bounces if no student discount." },
-  { name: "Robert", short: "VP of Sales", persona: "52-year-old VP, needs SOC2/GDPR compliance and SLA before trusting anyone." },
-  { name: "Sofia", short: "Gig Worker", persona: "25-year-old gig worker obsessed with price. Bounces on hidden fees." },
-  { name: "Daniel", short: "Senior Engineer", persona: "31-year-old engineer who hates buzzwords. Hunts for GitHub or API docs." },
-  { name: "Carol", short: "Time-Poor CEO", persona: "47-year-old CEO. Needs to grasp value in 10 seconds or she closes the tab." },
-  { name: "Leo", short: "Impulse Buyer", persona: "Compulsive impulse buyer who clicks BUY immediately if he sees a countdown timer." },
-  { name: "Beverly", short: "Confused Senior", persona: "68-year-old retiree frustrated by jargon. Needs a live chat button." },
-  { name: "Alex", short: "Skeptic", persona: "42-year-old journalist hunting for red flags: vague promises, hidden pricing." },
-  { name: "Aisha", short: "UX Designer", persona: "29-year-old UX designer who treats the site itself as the product demo." },
-  { name: "Sam", short: "Researcher", persona: "Methodical researcher who reads FAQ, About Us, and blog before buying." },
+  { name: "Maya", segment: "Budget / Young", short: "Budget Student", persona: "22-year-old college student, $30/mo budget, bounces if no student discount." },
+  { name: "Robert", segment: "Executive", short: "VP of Sales", persona: "52-year-old VP, needs SOC2/GDPR compliance and SLA before trusting anyone." },
+  { name: "Sofia", segment: "Budget / Young", short: "Gig Worker", persona: "25-year-old gig worker obsessed with price. Bounces on hidden fees." },
+  { name: "Daniel", segment: "Mid-Career Pro", short: "Senior Engineer", persona: "31-year-old engineer who hates buzzwords. Hunts for GitHub or API docs." },
+  { name: "Carol", segment: "Executive", short: "Time-Poor CEO", persona: "47-year-old CEO. Needs to grasp value in 10 seconds or she closes the tab." },
+  { name: "Leo", segment: "Niche / Specialist", short: "Impulse Buyer", persona: "Compulsive impulse buyer who clicks BUY immediately if he sees a countdown timer." },
+  { name: "Beverly", segment: "Niche / Specialist", short: "Confused Senior", persona: "68-year-old retiree frustrated by jargon. Needs a live chat button." },
+  { name: "Alex", segment: "Skeptic / Edge", short: "Skeptic", persona: "42-year-old journalist hunting for red flags: vague promises, hidden pricing." },
+  { name: "Aisha", segment: "Mid-Career Pro", short: "UX Designer", persona: "29-year-old UX designer who treats the site itself as the product demo." },
+  { name: "Sam", segment: "Niche / Specialist", short: "Researcher", persona: "Methodical researcher who reads FAQ, About Us, and blog before buying." },
 ];
 
 type AgentOutcome = { status: 'CONVERTED' | 'BOUNCED' | 'TIMED_OUT'; steps: Step[] };
@@ -113,7 +113,7 @@ function generateReport(targetUrl: string, results: { persona: string; status: s
   const host = (() => { try { return new URL(targetUrl).hostname; } catch { return targetUrl; } })();
 
   return `## Executive Summary
-Our synthetic swarm of ${total} ghost consumers tested ${host}. The simulation achieved a ${convRate}% conversion rate — ${converted} agents converted, ${bounced} bounced immediately. The most critical drop-off occurred at the pricing discovery phase, where price-sensitive personas could not locate transparent pricing information within the first 30 seconds.
+Our synthetic swarm of {total} ghost consumers tested ${host}. The simulation achieved a ${convRate}% conversion rate — ${converted} agents converted, ${bounced} bounced immediately. The most critical drop-off occurred at the pricing discovery phase, where price-sensitive personas could not locate transparent pricing information within the first 30 seconds.
 
 ## Key Friction Points
 1. **No visible pricing** — Budget-conscious and gig-economy personas (Sofia, Maya) bounced within 3 steps due to inability to find pricing. This represents a ~25% addressable loss.
@@ -144,10 +144,14 @@ Implementing recommendations 1-3 is projected to increase real-world conversion 
 }
 
 async function runDemoSimulation(targetUrl: string, numAgents: number, simulationId: number) {
-  const personas = DEMO_PERSONAS.slice(0, Math.min(numAgents, DEMO_PERSONAS.length));
+  const isLargeScale = numAgents > 10;
+  const realCount = isLargeScale ? 3 : numAgents;
+  
+  const personas = DEMO_PERSONAS.slice(0, Math.min(realCount, DEMO_PERSONAS.length));
   const url = targetUrl;
   const results: { persona: string; status: string; steps: Step[] }[] = [];
 
+  // Run the representative sample sessions
   for (let i = 0; i < personas.length; i++) {
     const p = personas[i];
     const outcome = buildAgentSteps(p, url, i);
@@ -155,8 +159,8 @@ async function runDemoSimulation(targetUrl: string, numAgents: number, simulatio
 
     // Insert session
     const sessResult = await run(
-      "INSERT INTO agent_sessions (simulation_id, agent_id, persona, final_status) VALUES (?, ?, ?, ?)",
-      [simulationId, `Ghost-${i + 1}`, p.persona, outcome.status]
+      "INSERT INTO agent_sessions (simulation_id, agent_id, persona, segment, final_status) VALUES (?, ?, ?, ?, ?)",
+      [simulationId, `Ghost-${i + 1}`, p.persona, p.segment, outcome.status]
     );
     const sessionId = sessResult.lastID;
 
@@ -177,14 +181,128 @@ async function runDemoSimulation(targetUrl: string, numAgents: number, simulatio
     }
 
     // Increment completed counter
-    await run("UPDATE simulations SET completed_agents = completed_agents + 1 WHERE id = ?", [simulationId]);
+    await run("UPDATE simulations SET completed_agents = ? WHERE id = ?", [i + 1, simulationId]);
+  }
+
+  // Handle hybrid projection for large swarm size
+  let projectedConversions = results.filter(r => r.status === 'CONVERTED').length;
+  let projectedBounces = results.filter(r => r.status === 'BOUNCED').length;
+  let projectedTimedOut = results.filter(r => r.status === 'TIMED_OUT').length;
+  
+  if (isLargeScale) {
+    const scaleFactor = numAgents / realCount;
+    projectedConversions = Math.floor(projectedConversions * scaleFactor);
+    projectedBounces = Math.floor(projectedBounces * scaleFactor);
+    projectedTimedOut = numAgents - projectedConversions - projectedBounces;
+
+    // Save projected stats
+    await run(
+      `UPDATE simulations 
+       SET conversions_count = ?, bounces_count = ?, timed_out_count = ?, errors_count = 0
+       WHERE id = ?`,
+      [projectedConversions, projectedBounces, projectedTimedOut, simulationId]
+    );
+
+    // Register simulated sessions for the remaining 7 personas
+    const simulatedPersonas = DEMO_PERSONAS.slice(realCount, 10);
+    for (let i = 0; i < simulatedPersonas.length; i++) {
+      const p = simulatedPersonas[i];
+      const status = i % 2 === 0 ? "BOUNCED" : (i % 3 === 0 ? "TIMED_OUT" : "CONVERTED");
+      
+      const sessResult = await run(
+        "INSERT INTO agent_sessions (simulation_id, agent_id, persona, segment, final_status) VALUES (?, ?, ?, ?, ?)",
+        [simulationId, `Ghost-Sim-${i + 1}`, p.persona, p.segment, status]
+      );
+      const sessionId = sessResult.lastID;
+
+      // Mock some logs
+      await run(
+        `INSERT INTO agent_logs
+           (session_id, step_number, thought_process, action, target, page_url, scroll_depth, action_success, duration_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [sessionId, 1, `Landing on ${targetUrl} — checking for page elements.`, "READ", "", url, null, null, 1500]
+      );
+      await run(
+        `INSERT INTO agent_logs
+           (session_id, step_number, thought_process, action, target, page_url, scroll_depth, action_success, duration_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [sessionId, 2, `Action resolution: ${status}`, status === "CONVERTED" ? "BUY" : (status === "BOUNCED" ? "BOUNCE" : "READ"), "", url, null, null, 800]
+      );
+    }
+  }
+
+  // Insert Focus Group debates for Demo
+  const host = (() => { try { return new URL(targetUrl).hostname; } catch { return targetUrl; } })();
+  const debateParticipants = [
+    { agentId: "Ghost-1", persona: DEMO_PERSONAS[0], status: results[0]?.status },
+    { agentId: "Ghost-2", persona: DEMO_PERSONAS[1], status: results[1]?.status },
+    { agentId: "Ghost-3", persona: DEMO_PERSONAS[2], status: results[2]?.status },
+    { agentId: "Ghost-Sim-1", persona: DEMO_PERSONAS[3], status: "TIMED_OUT" },
+    { agentId: "Ghost-Sim-2", persona: DEMO_PERSONAS[4], status: "CONVERTED" },
+  ];
+
+  const openingReviews: Record<string, string> = {
+    "Maya": `Honestly, I checked out ${host} but couldn't find any student discount. As a student with a tight budget, I bounced immediately.`,
+    "Robert": `From my perspective as a VP of Sales, compliance and security certifications were clear. I found the SOC2 compliance mention reassuring, so I signed up.`,
+    "Sofia": `I checked the page but pricing felt extremely complex. I didn't see transparent flat rates, so I exited.`,
+    "Daniel": `I looked around but didn't see clean API docs or code examples on the landing page. It made me feel like the product is a bit of a vendor lock-in risk.`,
+    "Carol": `I scanned the page for 10 seconds. The value proposition is far too wordy. I couldn't grasp the exact ROI immediately, so I left.`,
+  };
+
+  const rebuttals: Record<string, string> = {
+    "Maya": `I agree with Carol. If the value prop isn't clear and the price is hidden, it's just not worth the time for budget consumers.`,
+    "Robert": `I understand Daniel's point about API docs, but for enterprise purchasers, legal compliance and security SLAs are much more critical than code snippets.`,
+    "Sofia": `Robert's focus on enterprise compliance makes sense, but start-ups need quick implementation and simple pricing models.`,
+    "Daniel": `While I agree with Robert that security is important, a SaaS tool with poor developer documentation shows a lack of focus on product engineering.`,
+    "Carol": `We need to remember that different customers have different needs. Startups need speed, enterprises need compliance.`,
+  };
+
+  const stepIncrement = isLargeScale ? Math.max(1, Math.floor((numAgents - realCount) / debateParticipants.length)) : 1;
+
+  for (let idx = 0; idx < debateParticipants.length; idx++) {
+    const p = debateParticipants[idx];
+    const name = p.persona.name;
+    const opText = openingReviews[name] || `I visited the site. It was okay, but I ended up ${p.status === 'CONVERTED' ? 'purchasing' : 'bouncing'}.`;
+    await run(
+      "INSERT INTO simulation_debates (simulation_id, agent_id, persona, message) VALUES (?, ?, ?, ?)",
+      [simulationId, p.agentId, p.persona.persona, opText]
+    );
+
+    if (isLargeScale) {
+      const currentCompleted = Math.min(numAgents, realCount + (idx + 1) * stepIncrement);
+      await run("UPDATE simulations SET completed_agents = ? WHERE id = ?", [currentCompleted, simulationId]);
+      await new Promise(resolve => setTimeout(resolve, 800)); // sleep to simulate stream
+    }
+  }
+
+  for (let idx = 0; idx < debateParticipants.length; idx++) {
+    const p = debateParticipants[idx];
+    const name = p.persona.name;
+    const rebText = rebuttals[name] || `That is a fair point, but my experience was different because of my background.`;
+    await run(
+      "INSERT INTO simulation_debates (simulation_id, agent_id, persona, message) VALUES (?, ?, ?, ?)",
+      [simulationId, p.agentId, p.persona.persona, rebText]
+    );
+
+    if (isLargeScale) {
+      const currentCompleted = Math.min(numAgents, realCount + (idx + 1 + debateParticipants.length) * stepIncrement);
+      await run("UPDATE simulations SET completed_agents = ? WHERE id = ?", [currentCompleted, simulationId]);
+      await new Promise(resolve => setTimeout(resolve, 800)); // sleep to simulate stream
+    }
   }
 
   // Generate and save report
-  const report = generateReport(targetUrl, results);
+  const finalResultsForReport = isLargeScale 
+    ? [
+        { persona: DEMO_PERSONAS[0].persona, status: results[0]?.status, steps: results[0]?.steps },
+        { persona: DEMO_PERSONAS[1].persona, status: results[1]?.status, steps: results[1]?.steps },
+        { persona: DEMO_PERSONAS[2].persona, status: results[2]?.status, steps: results[2]?.steps },
+      ]
+    : results;
+  const report = generateReport(targetUrl, finalResultsForReport);
   await run(
-    "UPDATE simulations SET report_summary = ?, end_time = CURRENT_TIMESTAMP WHERE id = ?",
-    [report, simulationId]
+    "UPDATE simulations SET report_summary = ?, completed_agents = ?, end_time = CURRENT_TIMESTAMP WHERE id = ?",
+    [report, numAgents, simulationId]
   );
 }
 

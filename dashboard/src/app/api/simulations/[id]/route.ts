@@ -49,11 +49,21 @@ export async function GET(
         }));
 
         // ── 5. Aggregate stats ─────────────────────────────────────────────
-        const total = sessions.length;
-        const conversions = sessions.filter((s: Record<string, unknown>) => s.final_status === 'CONVERTED').length;
-        const bounces = sessions.filter((s: Record<string, unknown>) => s.final_status === 'BOUNCED').length;
-        const timedOut = sessions.filter((s: Record<string, unknown>) => s.final_status === 'TIMED_OUT').length;
-        const errors = sessions.filter((s: Record<string, unknown>) => s.final_status === 'ERROR').length;
+        const total = simulation.num_agents;
+        let conversions = simulation.conversions_count;
+        let bounces = simulation.bounces_count;
+        let timedOut = simulation.timed_out_count;
+        let errors = simulation.errors_count;
+
+        const isHybrid = conversions !== null && conversions !== undefined;
+
+        if (!isHybrid) {
+            conversions = sessions.filter((s: Record<string, unknown>) => s.final_status === 'CONVERTED').length;
+            bounces = sessions.filter((s: Record<string, unknown>) => s.final_status === 'BOUNCED').length;
+            timedOut = sessions.filter((s: Record<string, unknown>) => s.final_status === 'TIMED_OUT').length;
+            errors = sessions.filter((s: Record<string, unknown>) => s.final_status === 'ERROR').length;
+        }
+
         const conversionRate = total > 0 ? ((conversions / total) * 100).toFixed(1) + '%' : '0%';
 
         // ── 6. Action funnel ───────────────────────────────────────────────
@@ -63,43 +73,58 @@ export async function GET(
             if (a in funnel) funnel[a]++;
         }
 
+        // If it's a large hybrid simulation, scale funnel counts proportionally
+        if (isHybrid && sessions.length > 0) {
+            const scaleFactor = total / sessions.length;
+            for (const key in funnel) {
+                funnel[key] = Math.round(funnel[key] * scaleFactor);
+            }
+        }
+
         // ── 7. Action heatmap (% of total steps) ──────────────────────────
         const totalSteps = allLogs.length;
         const heatmap = Object.fromEntries(
-            Object.entries(funnel).map(([k, v]) => [k, totalSteps > 0 ? Math.round(v / totalSteps * 100) : 0])
+            Object.entries(funnel).map(([k, v]) => [k, totalSteps > 0 ? Math.round(v / (isHybrid ? (totalSteps * (total / sessions.length)) : totalSteps) * 100) : 0])
         );
 
         // ── 8. Persona segment analysis ────────────────────────────────────
-        const SEGMENTS: Record<string, string[]> = {
-            'Budget / Young': ['Maya', 'Jake', 'Sofia'],
-            'Mid-Career Pro': ['Marcus', 'Priya', 'Daniel', 'Aisha'],
-            'Executive': ['Robert', 'Carol', 'Hiro'],
-            'Niche / Specialist': ['Beverly', 'Tyler', 'Fatima', 'Leo', 'Sam'],
-            'Skeptic / Edge': ['Alex', 'Nina', 'Greg', 'Mia', 'Omar'],
-        };
+        const segmentNames = ['Budget / Young', 'Mid-Career Pro', 'Executive', 'Niche / Specialist', 'Skeptic / Edge'];
+        const personaSegments = segmentNames.map((label) => {
+            const matching = sessions.filter((s: Record<string, unknown>) => {
+                const sSeg = (s.segment as string) || '';
+                return sSeg.toLowerCase().includes(label.toLowerCase()) || 
+                       // Fallback to name check for old simulations
+                       (label === 'Budget / Young' && ['Maya', 'Sofia', 'Jake'].some(name => (s.persona as string).includes(name))) ||
+                       (label === 'Mid-Career Pro' && ['Marcus', 'Priya', 'Daniel', 'Aisha'].some(name => (s.persona as string).includes(name))) ||
+                       (label === 'Executive' && ['Robert', 'Carol', 'Hiro'].some(name => (s.persona as string).includes(name))) ||
+                       (label === 'Niche / Specialist' && ['Beverly', 'Tyler', 'Fatima', 'Leo', 'Sam'].some(name => (s.persona as string).includes(name))) ||
+                       (label === 'Skeptic / Edge' && ['Alex', 'Nina', 'Greg', 'Mia', 'Omar'].some(name => (s.persona as string).includes(name)));
+            });
+            let segTotal = matching.length;
+            let segConverted = matching.filter((s: Record<string, unknown>) => s.final_status === 'CONVERTED').length;
+            let segBounces = matching.filter((s: Record<string, unknown>) => s.final_status === 'BOUNCED').length;
 
-        const personaSegments = Object.entries(SEGMENTS).map(([label, names]) => {
-            const matching = sessions.filter((s: Record<string, unknown>) =>
-                names.some(name => (s.persona as string).includes(name))
-            );
-            const segTotal = matching.length;
-            const segConverted = matching.filter((s: Record<string, unknown>) => s.final_status === 'CONVERTED').length;
-            const segBounced = matching.filter((s: Record<string, unknown>) => s.final_status === 'BOUNCED').length;
+            if (isHybrid && sessions.length > 0) {
+                const scaleFactor = total / sessions.length;
+                segTotal = Math.round(segTotal * scaleFactor);
+                segConverted = Math.round(segConverted * scaleFactor);
+                segBounces = Math.round(segBounces * scaleFactor);
+            }
 
             // Avg steps
-            const avgSteps = segTotal > 0
+            const avgSteps = matching.length > 0
                 ? +(matching.reduce((acc: number, s: Record<string, unknown>) => {
                     return acc + (sessionMap.get(s.id as number) ?? []).length;
-                }, 0) / segTotal).toFixed(1)
+                }, 0) / matching.length).toFixed(1)
                 : 0;
 
             return {
                 label,
                 total: segTotal,
                 conversions: segConverted,
-                bounces: segBounced,
+                bounces: segBounces,
                 conversionRate: segTotal > 0 ? ((segConverted / segTotal) * 100).toFixed(1) + '%' : '0%',
-                bounceRate: segTotal > 0 ? ((segBounced / segTotal) * 100).toFixed(1) + '%' : '0%',
+                bounceRate: segTotal > 0 ? ((segBounces / segTotal) * 100).toFixed(1) + '%' : '0%',
                 avgSteps,
             };
         });
@@ -120,6 +145,12 @@ export async function GET(
             .slice(0, 15)
             .map(([url, data]) => ({ url, ...data }));
 
+        // ── 9.5. Focus group debates ───────────────────────────────────────
+        const debate = await query(
+            'SELECT * FROM simulation_debates WHERE simulation_id = ? ORDER BY id ASC',
+            [simId]
+        );
+
         // ── 10. Progress ───────────────────────────────────────────────────
         const progress = {
             completed: (simulation.completed_agents as number) ?? 0,
@@ -135,6 +166,7 @@ export async function GET(
             personaSegments,
             pageJourneys,
             progress,
+            debate,
         });
 
     } catch (error) {
