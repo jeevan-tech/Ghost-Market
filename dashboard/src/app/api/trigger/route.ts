@@ -325,7 +325,7 @@ export async function POST(request: Request) {
     const simulationId = result.lastID;
 
     // Default to demo mode in production (Cloud Run) or if explicitly set
-    const demoMode = process.env.DEMO_MODE === 'true' || process.env.NODE_ENV === 'production';
+    const demoMode = process.env.DEMO_MODE === 'true' || (process.env.NODE_ENV === 'production' && process.env.DEMO_MODE !== 'false');
 
     if (demoMode) {
       // Cloud Run: run the TypeScript demo simulator directly (no Python/Playwright needed)
