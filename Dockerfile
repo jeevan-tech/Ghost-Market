@@ -24,7 +24,6 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 WORKDIR /app
 
 # Copy the repository structure
-COPY .gitignore README.md ./
 COPY dashboard ./dashboard
 COPY engine ./engine
 
