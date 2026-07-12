@@ -10,6 +10,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install core utilities and Python
 RUN apt-get update && apt-get install -y \
     curl \
+    build-essential \
     python3 \
     python3-pip \
     python3-venv \
@@ -38,6 +39,7 @@ RUN python3 -m venv venv \
 # Set up Next.js environment and build the application
 WORKDIR /app/dashboard
 RUN npm install \
+    && npm rebuild sqlite3 --build-from-source \
     && npm run build
 
 # Cloud Run dynamically assigns a PORT environment variable (defaulting to 8080)
