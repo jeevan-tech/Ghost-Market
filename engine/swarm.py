@@ -368,12 +368,7 @@ Provide the estimated counts for:
 
 The sum of these 4 counts MUST be exactly {num_ghosts}.
 
-Also, define 4-6 custom customer segments/cohorts that represent the actual target market of this business domain (e.g. for Stripe: "SaaS Founders", "Independent Developers", "Enterprise CFOs", "E-commerce Merchants", etc.).
-Then, provide a list of 10 distinct, highly realistic representative personas belonging to these custom segments. Each persona must have:
-- "name": A realistic name
-- "segment": One of your defined custom segments
-- "persona": A detailed description (age, role, motivations, and what makes them convert or bounce)
-- "review": A 2-sentence focus group review/argument statement about their experience on the site.
+Also, provide a list of 10 distinct and diverse customer personas (representing all age groups and segments) and a 2-sentence focus group review/argument statement for each about their experience on the site.
 
 Return ONLY a valid JSON object in this format:
 {{
@@ -384,9 +379,9 @@ Return ONLY a valid JSON object in this format:
   "personas": [
     {{
       "name": "Alex",
-      "segment": "SaaS Founders",
-      "persona": "You are Alex, a 34-year-old SaaS founder who is looking to integrate sub-merchant payments...",
-      "review": "The checkout documentation is stellar, and we can launch in an afternoon. I'm converting."
+      "segment": "Skeptic / Edge",
+      "persona": "You are Alex, a 42-year-old journalist...",
+      "review": "I searched the page but couldn't find any pricing information. It felt untrustworthy so I bounced."
     }},
     ...
   ]

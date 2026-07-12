@@ -138,6 +138,30 @@ function buildAgentSteps(persona: typeof DEMO_PERSONAS[0], url: string, index: n
   ]};
 }
 
+async function callGemini(prompt: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY not set");
+  }
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json"
+      }
+    })
+  });
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Gemini API error: ${response.status} - ${errText}`);
+  }
+  const data = await response.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
+
 function generateReport(targetUrl: string, results: { persona: string; status: string; steps: Step[] }[]): string {
   const total     = results.length;
   const converted = results.filter(r => r.status === 'CONVERTED').length;
@@ -146,56 +170,200 @@ function generateReport(targetUrl: string, results: { persona: string; status: s
   const host = (() => { try { return new URL(targetUrl).hostname; } catch { return targetUrl; } })();
 
   return `## Executive Summary
-Our synthetic swarm of {total} ghost consumers tested ${host}. The simulation achieved a ${convRate}% conversion rate — ${converted} agents converted, ${bounced} bounced immediately. The most critical drop-off occurred at the pricing discovery phase, where price-sensitive personas could not locate transparent pricing information within the first 30 seconds.
+Our synthetic swarm of ${total} ghost consumers tested ${host}. The simulation achieved a ${convRate}% conversion rate — ${converted} agents converted, ${bounced} bounced immediately.
 
 ## Key Friction Points
-1. **No visible pricing** — Budget-conscious and gig-economy personas (Sofia, Maya) bounced within 3 steps due to inability to find pricing. This represents a ~25% addressable loss.
-2. **Missing technical credibility signals** — Developer and engineer personas (Daniel) could not find API documentation or GitHub links, creating perceived vendor lock-in risk.
-3. **Weak mobile-first hierarchy** — Executive personas (Carol) failed to grasp the core value proposition within 5 seconds, suggesting the hero copy is not scannable enough.
-4. **No live support signal** — Older demographics (Beverly) immediately bounced when no phone number or live chat was found, representing an excluded but high-value segment.
-
-## Top Performing Elements
-- **Social proof + case studies**: Researcher persona (Sam) converted after reading a compelling 3x ROI case study in the blog — content marketing is working.
-- **Urgency/scarcity signals**: Impulse buyer (Leo) converted immediately upon seeing a limited-time offer badge — urgency triggers are highly effective.
-- **Enterprise compliance signals**: VP persona (Robert) converted after spotting SOC 2/GDPR compliance badges, confirming enterprise trust signals are correctly placed.
-
-## High-Risk Personas
-- **Budget Consumer (26% of market)** → 0% conversion rate
-- **Senior/Non-technical (15% of market)** → 0% conversion rate
-- **Technical Skeptic (20% of market)** → 0% conversion rate
-These three segments represent 61% of your addressable market with near-zero conversion.
+1. **No visible pricing** — Price-sensitive personas bounced within 2 steps due to inability to find flat-rate pricing.
+2. **Missing technical credibility signals** — Developer personas could not find API documentation or GitHub links.
+3. **Weak mobile-first hierarchy** — Executive personas failed to grasp the core value proposition within 5 seconds.
 
 ## Priority Recommendations
-1. **Add a transparent pricing page** — Place a "Pricing" link in the primary navigation. This single change is projected to recover 15-20% of bounces.
-2. **Add public API documentation** — A /docs page with OpenAPI spec converts developers instantly.
-3. **Compress the hero** — Lead with one data point: "X% of startups who use [product] raise their next round." Remove or simplify all secondary copy.
-4. **Add a live chat widget** — Converts senior/confused personas who need human reassurance.
-5. **Add student/non-profit pricing** — A dedicated page increases price-sensitive conversions by an estimated 12%.
-
-## Predicted Real-World Impact
-Implementing recommendations 1-3 is projected to increase real-world conversion rate from the current ${convRate}% baseline to **${Math.min(45, Number(convRate) + 18).toFixed(1)}%** — a ${Math.min(45, Number(convRate) + 18 - Number(convRate)).toFixed(1)} percentage point lift worth approximately $240K in additional ARR per 10,000 monthly visitors.`;
+1. **Add a transparent pricing page** — Place a "Pricing" link in the primary navigation.
+2. **Add public API documentation** — A /docs page with code samples converts developers instantly.
+3. **Compress the hero** — Lead with a single, compelling data-driven headline.`;
 }
 
 async function runDemoSimulation(targetUrl: string, numAgents: number, simulationId: number) {
   const isLargeScale = numAgents > 3;
-  const realCount = isLargeScale ? 3 : numAgents;
-  
-  const personas = DEMO_PERSONAS.slice(0, Math.min(realCount, DEMO_PERSONAS.length));
   const url = targetUrl;
-  const results: { persona: string; status: string; steps: Step[] }[] = [];
+  const host = (() => { try { return new URL(targetUrl).hostname; } catch { return targetUrl; } })();
 
-  // Run the representative sample sessions
-  for (let i = 0; i < personas.length; i++) {
-    const p = personas[i];
-    const outcome = buildAgentSteps(p, url, i);
-    results.push({ persona: p.persona, status: outcome.status, steps: outcome.steps });
+  let personasList: { name: string; segment: string; short: string; persona: string }[] = [];
+  let conversionsCount = 0;
+  let bouncesCount = 0;
+  let timedOutCount = 0;
+  let individualOutcomes: { name: string; status: 'CONVERTED' | 'BOUNCED' | 'TIMED_OUT'; steps: { thought: string; action: string; target: string }[] }[] = [];
+  let debateMessages: { name: string; message: string }[] = [];
+  let reportText = "";
 
-    // Insert session
+  // Step 1: Call Gemini to generate custom, site-specific personas
+  try {
+    const prompt1 = `You are a professional UX Research Director.
+We are simulating a user-testing swarm on the website: ${targetUrl}.
+
+Generate a list of 10 distinct, highly realistic customer personas (representing different age groups, occupations, and mentalities) who would naturally visit this website.
+Ensure the personas are diverse and represent a balanced mix across these segments:
+- "Budget / Young" (price-sensitive, students, gig workers)
+- "Mid-Career Pro" (business professional, developers, marketers, designers, ROI-focused)
+- "Executive" (decision-makers, CEOs, VPs, CTOs, compliance/SLA-focused)
+- "Niche / Specialist" (seniors, shopify owners, non-profits, researchers)
+- "Skeptic / Edge" (critics, competitor analysts, privacy advocates, security researchers)
+
+Return ONLY a valid JSON array of 10 objects:
+[
+  {
+    "name": "Name",
+    "segment": "Segment name",
+    "short": "Short job title/archetype",
+    "persona": "Detailed description: You are <Name>, a <Age>-year-old <Job> who..."
+  }
+]
+Do not include markdown wrappers or code blocks. Just output raw JSON.`;
+
+    const rawPersonas = await callGemini(prompt1);
+    personasList = JSON.parse(rawPersonas);
+  } catch (err) {
+    console.warn("[Demo] Gemini persona generation failed, using default fallback:", err);
+    personasList = DEMO_PERSONAS.map(p => ({
+      name: p.name,
+      segment: getDynamicSegment(targetUrl, p.segment),
+      short: p.short,
+      persona: p.persona
+    }));
+  }
+
+  // Step 2: Call Gemini to project outcomes, step logs, debate, and consolidated report
+  try {
+    const prompt2 = `You are a CRO Simulator.
+We are simulating a user-testing swarm of ${numAgents} agents on the website: ${targetUrl}.
+
+Here are the 10 custom customer personas visiting this site:
+${JSON.stringify(personasList, null, 2)}
+
+Project the final behavior and outcome distribution for the entire swarm of ${numAgents} agents.
+Provide the estimated counts for:
+- Converted (agents who purchase or register)
+- Bounced (agents who leave immediately)
+- Timed Out (agents who browse but do not convert)
+
+The sum of these 3 counts must be exactly ${numAgents}.
+
+Also, for the 10 representative personas listed above, determine their final status (CONVERTED, BOUNCED, or TIMED_OUT) and generate a step-by-step browsing log (2 steps each) describing their thoughts and actions (READ, CLICK, SCROLL_DOWN, BOUNCE, BUY) on the site.
+
+Also, generate a transcript of a 10-message debate/conversation where these personas discuss and argue about the website. Personas should reply to each other, counter arguments, complain about usability/pricing, and defend their views in first person.
+
+Also, generate a comprehensive consolidated CRO analyst report summarizing key friction points, top performing elements, high-risk personas, and priority recommendations.
+
+Return ONLY a valid JSON object in this format:
+{
+  "conversions": 12,
+  "bounces": 80,
+  "timed_out": 8,
+  "outcomes": [
+    {
+      "name": "Name",
+      "status": "CONVERTED",
+      "steps": [
+        {
+          "thought": "...",
+          "action": "READ",
+          "target": ""
+        },
+        {
+          "thought": "...",
+          "action": "BUY",
+          "target": ""
+        }
+      ]
+    }
+  ],
+  "debate": [
+    {
+      "name": "Name",
+      "message": "..."
+    }
+  ],
+  "report": "## Executive Summary\\n... (markdown content)"
+}
+Do not include markdown wrappers or code blocks. Just output raw JSON.`;
+
+    const rawSim = await callGemini(prompt2);
+    const simResult = JSON.parse(rawSim);
+
+    conversionsCount = simResult.conversions || 0;
+    bouncesCount = simResult.bounces || 0;
+    timedOutCount = simResult.timed_out || 0;
+    individualOutcomes = simResult.outcomes || [];
+    debateMessages = simResult.debate || [];
+    reportText = simResult.report || "";
+  } catch (err) {
+    console.warn("[Demo] Gemini simulation run failed, using default fallback:", err);
+    // Mathematical fallback
+    conversionsCount = Math.floor(numAgents * 0.3);
+    bouncesCount = Math.floor(numAgents * 0.5);
+    timedOutCount = numAgents - conversionsCount - bouncesCount;
+
+    // Build default outcomes
+    individualOutcomes = personasList.map((p, idx) => {
+      const status = idx % 2 === 0 ? "BOUNCED" : (idx % 3 === 0 ? "TIMED_OUT" : "CONVERTED");
+      return {
+        name: p.name,
+        status,
+        steps: [
+          { thought: `Landing on ${host} — checking for page elements.`, action: "READ", target: "" },
+          { thought: `Action resolution: ${status}`, action: status === "CONVERTED" ? "BUY" : (status === "BOUNCED" ? "BOUNCE" : "READ"), target: "" }
+        ]
+      };
+    });
+
+    // Build default debate
+    debateMessages = personasList.slice(0, 5).map(p => ({
+      name: p.name,
+      message: `I visited ${host}. It was okay, but I ended up ${p.name === 'Robert' ? 'converting' : 'bouncing'}.`
+    }));
+
+    // Build default report
+    const dummyResults = individualOutcomes.map(o => ({
+      persona: o.name,
+      status: o.status,
+      steps: o.steps.map(s => ({ thought: s.thought, action: s.action, target: s.target, ms: 1000 }))
+    }));
+    reportText = generateReport(targetUrl, dummyResults);
+  }
+
+  // Ensure counts sum up to numAgents
+  if (conversionsCount + bouncesCount + timedOutCount !== numAgents) {
+    timedOutCount = numAgents - conversionsCount - bouncesCount;
+  }
+
+  // Update simulations table with projected counts
+  await run(
+    `UPDATE simulations 
+     SET conversions_count = ?, bounces_count = ?, timed_out_count = ?, errors_count = 0
+     WHERE id = ?`,
+    [conversionsCount, bouncesCount, timedOutCount, simulationId]
+  );
+
+  // Write all 10 custom sessions and steps to database
+  const sessionIdsMap = new Map<string, number>();
+  const sessionPersonasMap = new Map<string, string>();
+  for (let i = 0; i < personasList.length; i++) {
+    const p = personasList[i];
+    const outcome = individualOutcomes.find(o => o.name === p.name) || {
+      status: i % 2 === 0 ? "BOUNCED" : "CONVERTED",
+      steps: [
+        { thought: `Browsing ${host}.`, action: "READ", target: "" },
+        { thought: `Resolving action.`, action: i % 2 === 0 ? "BOUNCE" : "BUY", target: "" }
+      ]
+    };
+
     const sessResult = await run(
       "INSERT INTO agent_sessions (simulation_id, agent_id, persona, segment, final_status) VALUES (?, ?, ?, ?, ?)",
-      [simulationId, `Ghost-${i + 1}`, p.persona, getDynamicSegment(url, p.segment), outcome.status]
+      [simulationId, `Ghost-${i + 1}`, p.persona, p.segment, outcome.status]
     );
     const sessionId = sessResult.lastID;
+    sessionIdsMap.set(p.name, sessionId);
+    sessionPersonasMap.set(p.name, p.persona);
 
     // Insert steps
     for (let s = 0; s < outcome.steps.length; s++) {
@@ -206,136 +374,35 @@ async function runDemoSimulation(targetUrl: string, numAgents: number, simulatio
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           sessionId, s + 1, step.thought, step.action, step.target || '',
-          url, step.scroll ?? null,
-          step.success !== undefined ? (step.success ? 1 : 0) : null,
-          step.ms,
+          url, null, null, 1000
         ]
       );
     }
-
-    // Increment completed counter
-    await run("UPDATE simulations SET completed_agents = ? WHERE id = ?", [i + 1, simulationId]);
   }
 
-  // Handle hybrid projection for large swarm size
-  let projectedConversions = results.filter(r => r.status === 'CONVERTED').length;
-  let projectedBounces = results.filter(r => r.status === 'BOUNCED').length;
-  let projectedTimedOut = results.filter(r => r.status === 'TIMED_OUT').length;
-  
-  if (isLargeScale) {
-    const scaleFactor = numAgents / realCount;
-    projectedConversions = Math.floor(projectedConversions * scaleFactor);
-    projectedBounces = Math.floor(projectedBounces * scaleFactor);
-    projectedTimedOut = numAgents - projectedConversions - projectedBounces;
+  // Stream debate and update completed_agents count in real time
+  const stepIncrement = isLargeScale ? Math.max(1, Math.floor((numAgents - 3) / debateMessages.length)) : 1;
+  for (let idx = 0; idx < debateMessages.length; idx++) {
+    const msg = debateMessages[idx];
+    const sessionId = sessionIdsMap.get(msg.name) || 0;
+    const personaText = sessionPersonasMap.get(msg.name) || msg.name;
 
-    // Save projected stats
-    await run(
-      `UPDATE simulations 
-       SET conversions_count = ?, bounces_count = ?, timed_out_count = ?, errors_count = 0
-       WHERE id = ?`,
-      [projectedConversions, projectedBounces, projectedTimedOut, simulationId]
-    );
-
-    // Register simulated sessions for the remaining 7 personas
-    const simulatedPersonas = DEMO_PERSONAS.slice(realCount, 10);
-    for (let i = 0; i < simulatedPersonas.length; i++) {
-      const p = simulatedPersonas[i];
-      const status = i % 2 === 0 ? "BOUNCED" : (i % 3 === 0 ? "TIMED_OUT" : "CONVERTED");
-      
-      const sessResult = await run(
-        "INSERT INTO agent_sessions (simulation_id, agent_id, persona, segment, final_status) VALUES (?, ?, ?, ?, ?)",
-        [simulationId, `Ghost-Sim-${i + 1}`, p.persona, getDynamicSegment(url, p.segment), status]
-      );
-      const sessionId = sessResult.lastID;
-
-      // Mock some logs
-      await run(
-        `INSERT INTO agent_logs
-           (session_id, step_number, thought_process, action, target, page_url, scroll_depth, action_success, duration_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [sessionId, 1, `Landing on ${targetUrl} — checking for page elements.`, "READ", "", url, null, null, 1500]
-      );
-      await run(
-        `INSERT INTO agent_logs
-           (session_id, step_number, thought_process, action, target, page_url, scroll_depth, action_success, duration_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [sessionId, 2, `Action resolution: ${status}`, status === "CONVERTED" ? "BUY" : (status === "BOUNCED" ? "BOUNCE" : "READ"), "", url, null, null, 800]
-      );
-    }
-  }
-
-  // Insert Focus Group debates for Demo
-  const host = (() => { try { return new URL(targetUrl).hostname; } catch { return targetUrl; } })();
-  const debateParticipants = [
-    { agentId: "Ghost-1", persona: DEMO_PERSONAS[0], status: results[0]?.status },
-    { agentId: "Ghost-2", persona: DEMO_PERSONAS[1], status: results[1]?.status },
-    { agentId: "Ghost-3", persona: DEMO_PERSONAS[2], status: results[2]?.status },
-    { agentId: "Ghost-Sim-1", persona: DEMO_PERSONAS[3], status: "TIMED_OUT" },
-    { agentId: "Ghost-Sim-2", persona: DEMO_PERSONAS[4], status: "CONVERTED" },
-  ];
-
-  const openingReviews: Record<string, string> = {
-    "Maya": `Honestly, I checked out ${host} but couldn't find any student discount. As a student with a tight budget, I bounced immediately.`,
-    "Robert": `From my perspective as a VP of Sales, compliance and security certifications were clear. I found the SOC2 compliance mention reassuring, so I signed up.`,
-    "Sofia": `I checked the page but pricing felt extremely complex. I didn't see transparent flat rates, so I exited.`,
-    "Daniel": `I looked around but didn't see clean API docs or code examples on the landing page. It made me feel like the product is a bit of a vendor lock-in risk.`,
-    "Carol": `I scanned the page for 10 seconds. The value proposition is far too wordy. I couldn't grasp the exact ROI immediately, so I left.`,
-  };
-
-  const rebuttals: Record<string, string> = {
-    "Maya": `I agree with Carol. If the value prop isn't clear and the price is hidden, it's just not worth the time for budget consumers.`,
-    "Robert": `I understand Daniel's point about API docs, but for enterprise purchasers, legal compliance and security SLAs are much more critical than code snippets.`,
-    "Sofia": `Robert's focus on enterprise compliance makes sense, but start-ups need quick implementation and simple pricing models.`,
-    "Daniel": `While I agree with Robert that security is important, a SaaS tool with poor developer documentation shows a lack of focus on product engineering.`,
-    "Carol": `We need to remember that different customers have different needs. Startups need speed, enterprises need compliance.`,
-  };
-
-  const stepIncrement = isLargeScale ? Math.max(1, Math.floor((numAgents - realCount) / debateParticipants.length)) : 1;
-
-  for (let idx = 0; idx < debateParticipants.length; idx++) {
-    const p = debateParticipants[idx];
-    const name = p.persona.name;
-    const opText = openingReviews[name] || `I visited the site. It was okay, but I ended up ${p.status === 'CONVERTED' ? 'purchasing' : 'bouncing'}.`;
     await run(
       "INSERT INTO simulation_debates (simulation_id, agent_id, persona, message) VALUES (?, ?, ?, ?)",
-      [simulationId, p.agentId, p.persona.persona, opText]
+      [simulationId, `Ghost-${idx + 1}`, personaText, msg.message]
     );
 
     if (isLargeScale) {
-      const currentCompleted = Math.min(numAgents, realCount + (idx + 1) * stepIncrement);
+      const currentCompleted = Math.min(numAgents, 3 + (idx + 1) * stepIncrement);
       await run("UPDATE simulations SET completed_agents = ? WHERE id = ?", [currentCompleted, simulationId]);
       await new Promise(resolve => setTimeout(resolve, 800)); // sleep to simulate stream
     }
   }
 
-  for (let idx = 0; idx < debateParticipants.length; idx++) {
-    const p = debateParticipants[idx];
-    const name = p.persona.name;
-    const rebText = rebuttals[name] || `That is a fair point, but my experience was different because of my background.`;
-    await run(
-      "INSERT INTO simulation_debates (simulation_id, agent_id, persona, message) VALUES (?, ?, ?, ?)",
-      [simulationId, p.agentId, p.persona.persona, rebText]
-    );
-
-    if (isLargeScale) {
-      const currentCompleted = Math.min(numAgents, realCount + (idx + 1 + debateParticipants.length) * stepIncrement);
-      await run("UPDATE simulations SET completed_agents = ? WHERE id = ?", [currentCompleted, simulationId]);
-      await new Promise(resolve => setTimeout(resolve, 800)); // sleep to simulate stream
-    }
-  }
-
-  // Generate and save report
-  const finalResultsForReport = isLargeScale 
-    ? [
-        { persona: DEMO_PERSONAS[0].persona, status: results[0]?.status, steps: results[0]?.steps },
-        { persona: DEMO_PERSONAS[1].persona, status: results[1]?.status, steps: results[1]?.steps },
-        { persona: DEMO_PERSONAS[2].persona, status: results[2]?.status, steps: results[2]?.steps },
-      ]
-    : results;
-  const report = generateReport(targetUrl, finalResultsForReport);
+  // Update report summary and finish simulation
   await run(
     "UPDATE simulations SET report_summary = ?, completed_agents = ?, end_time = CURRENT_TIMESTAMP WHERE id = ?",
-    [report, numAgents, simulationId]
+    [reportText, numAgents, simulationId]
   );
 }
 
