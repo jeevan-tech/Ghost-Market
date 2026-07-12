@@ -88,11 +88,19 @@ export async function GET(
         );
 
         // ── 8. Persona segment analysis ────────────────────────────────────
-        const segmentNames = ['Budget / Young', 'Mid-Career Pro', 'Executive', 'Niche / Specialist', 'Skeptic / Edge'];
+        const segmentsSet = new Set<string>();
+        sessions.forEach((s: any) => {
+            if (s.segment) segmentsSet.add(s.segment);
+        });
+        
+        const segmentNames = segmentsSet.size > 0 
+            ? Array.from(segmentsSet) 
+            : ['Budget / Young', 'Mid-Career Pro', 'Executive', 'Niche / Specialist', 'Skeptic / Edge'];
+
         const personaSegments = segmentNames.map((label) => {
             const matching = sessions.filter((s: Record<string, unknown>) => {
                 const sSeg = (s.segment as string) || '';
-                return sSeg.toLowerCase().includes(label.toLowerCase()) || 
+                return sSeg.toLowerCase() === label.toLowerCase() || 
                        // Fallback to name check for old simulations
                        (label === 'Budget / Young' && ['Maya', 'Sofia', 'Jake'].some(name => (s.persona as string).includes(name))) ||
                        (label === 'Mid-Career Pro' && ['Marcus', 'Priya', 'Daniel', 'Aisha'].some(name => (s.persona as string).includes(name))) ||

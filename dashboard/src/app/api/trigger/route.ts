@@ -21,6 +21,39 @@ const DEMO_PERSONAS = [
 type AgentOutcome = { status: 'CONVERTED' | 'BOUNCED' | 'TIMED_OUT'; steps: Step[] };
 type Step = { thought: string; action: string; target: string; scroll?: number; success?: boolean; ms: number };
 
+function getDynamicSegment(url: string, staticSegment: string): string {
+  const host = url.toLowerCase().includes('stripe') ? 'stripe' : url.toLowerCase().includes('vercel') ? 'vercel' : 'generic';
+  
+  if (host === 'stripe') {
+    if (staticSegment === 'Budget / Young') return 'Startup Founders';
+    if (staticSegment === 'Mid-Career Pro') return 'Integration Engineers';
+    if (staticSegment === 'Executive') return 'Finance Officers';
+    if (staticSegment === 'Niche / Specialist') return 'SaaS Platforms';
+    return 'Security & Compliance';
+  }
+  
+  if (host === 'vercel') {
+    if (staticSegment === 'Budget / Young') return 'Indie Developers';
+    if (staticSegment === 'Mid-Career Pro') return 'Frontend Engineers';
+    if (staticSegment === 'Executive') return 'Engineering Directors';
+    if (staticSegment === 'Niche / Specialist') return 'Digital Agencies';
+    return 'System Architects';
+  }
+
+  // Generic Dynamic Segments based on the site domain
+  let domainLabel = 'Consumers';
+  try {
+    const domain = new URL(url).hostname.replace('www.', '').split('.')[0];
+    domainLabel = domain.charAt(0).toUpperCase() + domain.slice(1);
+  } catch (e) {}
+
+  if (staticSegment === 'Budget / Young') return `Price-Sensitive ${domainLabel} Users`;
+  if (staticSegment === 'Mid-Career Pro') return `Technical Professionals`;
+  if (staticSegment === 'Executive') return `Business Decision Makers`;
+  if (staticSegment === 'Niche / Specialist') return `Specialist Researchers`;
+  return `Edge Skeptics`;
+}
+
 function buildAgentSteps(persona: typeof DEMO_PERSONAS[0], url: string, index: number): AgentOutcome {
   const host = (() => { try { return new URL(url).hostname; } catch { return url; } })();
 
@@ -160,7 +193,7 @@ async function runDemoSimulation(targetUrl: string, numAgents: number, simulatio
     // Insert session
     const sessResult = await run(
       "INSERT INTO agent_sessions (simulation_id, agent_id, persona, segment, final_status) VALUES (?, ?, ?, ?, ?)",
-      [simulationId, `Ghost-${i + 1}`, p.persona, p.segment, outcome.status]
+      [simulationId, `Ghost-${i + 1}`, p.persona, getDynamicSegment(url, p.segment), outcome.status]
     );
     const sessionId = sessResult.lastID;
 
@@ -211,7 +244,7 @@ async function runDemoSimulation(targetUrl: string, numAgents: number, simulatio
       
       const sessResult = await run(
         "INSERT INTO agent_sessions (simulation_id, agent_id, persona, segment, final_status) VALUES (?, ?, ?, ?, ?)",
-        [simulationId, `Ghost-Sim-${i + 1}`, p.persona, p.segment, status]
+        [simulationId, `Ghost-Sim-${i + 1}`, p.persona, getDynamicSegment(url, p.segment), status]
       );
       const sessionId = sessResult.lastID;
 
