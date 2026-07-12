@@ -433,7 +433,7 @@ Do not include markdown tags or surrounding text. Just output raw JSON."""
 # ── Main Swarm Orchestrator ───────────────────────────────────────────────────
 async def run_swarm(target_url: str, num_ghosts: int = 5, simulation_id: Optional[int] = None):
     # Set worker bounds for hybrid simulation
-    is_large_scale = num_ghosts > 10
+    is_large_scale = num_ghosts > 3
     real_count = min(3, num_ghosts) if is_large_scale else num_ghosts
     
     max_workers, sem_limit, tier_name = _tier(real_count)

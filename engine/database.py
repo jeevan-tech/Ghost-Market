@@ -2,7 +2,7 @@ import sqlite3
 import os
 from typing import Optional
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "ghost_logs.db")
+DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "ghost_logs.db"))
 
 def init_db():
     """Initializes the SQLite database. Safe to call on every run (idempotent)."""

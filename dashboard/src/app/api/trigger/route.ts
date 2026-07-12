@@ -144,7 +144,7 @@ Implementing recommendations 1-3 is projected to increase real-world conversion 
 }
 
 async function runDemoSimulation(targetUrl: string, numAgents: number, simulationId: number) {
-  const isLargeScale = numAgents > 10;
+  const isLargeScale = numAgents > 3;
   const realCount = isLargeScale ? 3 : numAgents;
   
   const personas = DEMO_PERSONAS.slice(0, Math.min(realCount, DEMO_PERSONAS.length));

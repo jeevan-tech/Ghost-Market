@@ -17,12 +17,9 @@ let sqliteDb: any = null;
 function getSqliteDb() {
   if (sqliteDb) return sqliteDb;
 
-  const demoMode = process.env.DEMO_MODE === 'true' || process.env.NODE_ENV === 'production';
-  if (demoMode) return null;
-
   try {
     const sqlite3 = require('sqlite3').verbose();
-    const dbFile = path.resolve(process.cwd(), '../engine/ghost_logs.db');
+    const dbFile = process.env.DB_PATH || path.resolve(process.cwd(), '../engine/ghost_logs.db');
     const dbDir = path.dirname(dbFile);
     if (!fs.existsSync(dbDir)) {
       fs.mkdirSync(dbDir, { recursive: true });
